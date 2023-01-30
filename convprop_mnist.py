@@ -144,10 +144,10 @@ idx = 0
 
 fig2, ax = plt.subplots(facecolor='w', figsize=(12, 7))
 labels = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+print(f"The target label is: {targets[idx]}")
 
 #  Plot spike count histogram
 anim = splt.spike_count(spk_rec[:, idx].detach().cpu(), fig2, ax, labels=labels,
                         animate=True, interpolate=4)
 
 HTML(anim.to_html5_video())
-print(f"The target label is: {targets[idx]}")
