@@ -72,16 +72,16 @@ for step in range(num_steps):
     spk_out, mem_out = net(data)
 
 def forward_pass(net, num_steps, data):
-  mem_rec = []
-  spk_rec = []
-  utils.reset(net)  # resets hidden states for all LIF neurons in net
+    mem_rec = []
+    spk_rec = []
+    utils.reset(net)  # resets hidden states for all LIF neurons in net
 
-  for step in range(num_steps):
-      spk_out, mem_out = net(data)
-      spk_rec.append(spk_out)
-      mem_rec.append(mem_out)
+    for step in range(num_steps):
+        spk_out, mem_out = net(data)
+        spk_rec.append(spk_out)
+        mem_rec.append(mem_out)
 
-  return torch.stack(spk_rec), torch.stack(mem_rec)
+    return torch.stack(spk_rec), torch.stack(mem_rec)
 
 spk_rec, mem_rec = forward_pass(net, num_steps, data)
 
@@ -92,21 +92,22 @@ print(f"The loss from an untrained network is {loss_val.item():.3f}")
 print(f"The accuracy of a single batch using an untrained network is {acc * 100:.3f}%")
 
 def batch_accuracy(train_loader, net, num_steps):
-  with torch.no_grad():
-    total = 0
-    acc = 0
-    net.eval()
+    with torch.no_grad():
+        total = 0
+        acc = 0
+        net.eval()
 
     train_loader = iter(train_loader)
+
     for data, targets in train_loader:
-      data = data.to(device)
-      targets = targets.to(device)
-      spk_rec, _ = forward_pass(net, num_steps, data)
+        data = data.to(device)
+        targets = targets.to(device)
+        spk_rec, _ = forward_pass(net, num_steps, data)
 
-      acc += SF.accuracy_rate(spk_rec, targets) * spk_rec.size(1)
-      total += spk_rec.size(1)
+        acc += SF.accuracy_rate(spk_rec, targets) * spk_rec.size(1)
+        total += spk_rec.size(1)
 
-  return acc/total
+    return acc/total
 
 test_acc = batch_accuracy(test_loader, net, num_steps)
 print(f"The total accuracy on the test set is: {test_acc * 100:.2f}%")
