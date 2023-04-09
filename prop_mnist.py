@@ -6,12 +6,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+from sklearn.preprocessing import minmax_scale
+from scipy.stats import bernoulli
+from keras.datasets import mnist
 
 import matplotlib.pyplot as plt
 import numpy as np
 import itertools
-
-lif1 = snn.Leaky(beta=0.9)
+import random
 
 # dataloader arguments
 batch_size = 128
@@ -142,6 +144,64 @@ loss_hist = []
 test_loss_hist = []
 counter = 0
 
+ST = True
+AST = False
+drop_num = 0        # AST 50
+reinforce_num = 1
+num_AST = num_hidden
+pre_average = []
+dropout_index = []
+drop_input = []
+reinforce_input = []
+reinforce_ref = []
+dead_input = []
+
+pre = mnist.load_data()
+pre_x = pre[0][0].reshape(60000, 784)
+pre_y = pre[0][1].reshape(60000, 1)
+preprocessed = np.concatenate((pre_x, pre_y), axis=1)
+preprocessed = preprocessed[preprocessed[:, 784].argsort()]
+preprocessed = preprocessed[:, 0:784]
+
+num_inputs = 784
+pre_size = 6000
+entire = np.sort(np.mean(preprocessed, axis=0))
+
+if ST:
+    for i in range(10):
+        pre_average.append(np.mean(preprocessed[i * pre_size:(i + 1) * pre_size], axis=0))
+
+        if AST:
+            drop_num = len(np.where(pre_average[i] <= entire[int(num_inputs * 0.3) - 1])[0])
+            reinforce_num = len(np.where(pre_average[i] >= entire[int(num_inputs) - 1])[0])
+
+        drop_input.append(np.argwhere(pre_average[i] < np.sort(pre_average[i])[0:drop_num + 1][-1]).flatten())
+        reinforce_input.append(
+            np.argwhere(pre_average[i] > np.sort(pre_average[i])[0:num_inputs - reinforce_num][-1]).flatten())
+        if reinforce_num != 0:
+            values = np.sort(pre_average[i])[::-1][:reinforce_num]
+            reinforce_ref.append(values / np.max(values))
+        else:
+            reinforce_ref.append([])
+
+drop_input *= int(np.ceil(num_hidden / 10))
+reinforce_input *= int(np.ceil(num_hidden / 10))
+reinforce_ref *= int(np.ceil(num_hidden / 10))
+template_exc = np.arange(num_hidden)
+
+ADC = False
+
+DS = True
+DS_out_num = 10
+DS_hidden_num = 800
+dead_input = []
+if DS:
+    for i in range(DS_out_num):
+        dead_input.append(random.sample(range(0, num_hidden), DS_hidden_num))
+dead_out = random.sample(range(0, num_outputs), DS_out_num)
+
+SC = False
+
 # Outer training loop
 for epoch in range(num_epochs):
     iter_counter = 0
@@ -157,14 +217,49 @@ for epoch in range(num_epochs):
         spk_rec, mem_rec = net(data.view(batch_size, -1))
 
         # initialize the loss & sum over time
-        loss_val = torch.zeros((1), dtype=dtype, device=device)
+        loss_val = torch.zeros(1, dtype=dtype, device=device)
         for step in range(num_steps):
             loss_val += loss(mem_rec[step], targets)
+
+        # Synaptic Template
+        if ST:
+            for i in range(len(template_exc)):
+                for j in drop_input[i]:
+                    a = list(net.parameters())[0].data
+                    list(net.parameters())[0].data[template_exc[i], j] = 0
+                for j in reinforce_input[i]:
+                    if list(net.parameters())[0].data[template_exc[i], j] <= 1:
+                        list(net.parameters())[0].data[template_exc[i], j] = \
+                            reinforce_ref[int(template_exc[i])][int(np.where(j == reinforce_input[i])[0])] * 0.2
+
+        # Dead synapses
+        if DS:
+            for i in range(len(dead_out)):
+                for j in dead_input[i]:
+                    list(net.parameters())[2].data[dead_out[i], j] = 0
+
+        # Synaptic Weight Scaling
+        if SC:
+            list(net.parameters())[2].data *= 1.0001     # 1.0001
 
         # Gradient calculation + weight update
         optimizer.zero_grad()
         loss_val.backward()
         optimizer.step()
+
+        # Adaptive Drop Connect
+        if ADC:
+            p = np.round(minmax_scale(
+                np.nan_to_num(list(net.parameters())[2].data.cpu().detach().numpy().reshape(num_outputs * num_hidden),
+                              copy=False),
+                feature_range=(0.9995, 1)).reshape(num_outputs, num_hidden), 3)
+            m = torch.zeros(num_outputs, num_hidden).to('cuda')
+
+            for i in range(num_outputs):
+                for j in range(num_hidden):
+                    m[i, j] = int(bernoulli.rvs(p[i, j], size=1))
+
+            list(net.parameters())[2].data *= m
 
         # Store loss history for future plotting
         loss_hist.append(loss_val.item())
@@ -203,7 +298,7 @@ plt.show()
 total = 0
 correct = 0
 
-# drop_last switched to False to keep all samples
+# drop_last switched to False value to keep all samples
 test_loader = DataLoader(mnist_test, batch_size=batch_size, shuffle=True, drop_last=False)
 
 with torch.no_grad():
