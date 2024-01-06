@@ -24,14 +24,14 @@ parser.add_argument("--batch_size", type=int, default=100)
 parser.add_argument("--data_path", type=str, default="propdata/CIFAR10")
 parser.add_argument("--num_steps", type=int, default=50)
 parser.add_argument("--num_epochs", type=int, default=10)
-parser.add_argument("--ECOC", type=bool, default=False)
-parser.add_argument("--FS", type=str, default="train")
+parser.add_argument("--ECOC", type=bool, default=True)
+parser.add_argument("--FS", type=str, default=None)
 parser.add_argument("--FT", type=str, default="sporadic")
 parser.add_argument("--FG", type=bool, default=False)
-parser.add_argument("--FE", type=int, default=0)
+parser.add_argument("--FE", type=int, default=1)
 parser.add_argument("--FL", type=int, default=2)
 parser.add_argument("--FR", type=float, default=0.1)
-parser.add_argument("--stuck", type=float, default=0.3)
+parser.add_argument("--stuck", type=float, default=-0.3)
 parser.add_argument("--mod", type=bool, default=False)
 parser.add_argument("--std", type=float, default=0.1)
 parser.add_argument("--gpu_num", type=int, default=0)
@@ -83,16 +83,16 @@ test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True, drop_las
 
 # Define codes for ECOC
 if ECOC:
-    defined_code = torch.tensor([[0, 0, 1, 0, 0, 0, 0, 0, 0, 1],
-                                 [0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
-                                 [0, 0, 1, 1, 1, 0, 0, 1, 0, 0],
-                                 [0, 0, 0, 1, 0, 0, 1, 1, 0, 1],
-                                 [0, 0, 1, 0, 0, 0, 1, 1, 1, 0],
-                                 [0, 0, 0, 1, 0, 1, 0, 0, 0, 0],
-                                 [1, 0, 1, 0, 1, 1, 0, 0, 1, 0],
-                                 [0, 0, 1, 1, 0, 1, 0, 1, 1, 1],
-                                 [0, 0, 1, 1, 1, 1, 1, 0, 0, 1],
-                                 [0, 0, 1, 0, 1, 1, 1, 1, 0, 1]], dtype=dtype).to(device)
+    defined_code = torch.tensor([[0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0],
+                                 [1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1],
+                                 [0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+                                 [1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1],
+                                 [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+                                 [1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+                                 [0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0],
+                                 [1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1],
+                                 [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0],
+                                 [0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1]], dtype=dtype).to(device)
     num_classes = len(defined_code)
     output_num = len(defined_code[0])
 
@@ -234,7 +234,7 @@ def code_convert(tensor: torch.Tensor):
 
     return torch.tensor(code_converted).to(device)
 
-def distance_pred(output: torch.Tensor, batch_size: int):
+def hamming_distance_pred(output: torch.Tensor, batch_size: int):
     bin_output = output.sum(dim=0).bool().int()
     pred = torch.zeros(batch_size, num_classes).to(device)
     for i in range(batch_size):
@@ -247,7 +247,7 @@ def distance_pred(output: torch.Tensor, batch_size: int):
 def print_batch_accuracy(data, targets, train=False):
     out_spk, _ = net(data)
     if ECOC:
-        train_pred = distance_pred(out_spk, batch_size)
+        train_pred = hamming_distance_pred(out_spk, batch_size)
     else:
         _, train_pred = out_spk.sum(dim=0).max(1)
     acc = np.mean((targets == train_pred).detach().cpu().numpy())
@@ -442,7 +442,7 @@ with torch.no_grad():
 
         # calculate total accuracy
         if ECOC:
-            test_pred = distance_pred(test_spk, batch_size)
+            test_pred = hamming_distance_pred(test_spk, batch_size)
         else:
             _, test_pred = test_spk.sum(dim=0).max(1)
         total += targets.size(0)

@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-from scipy.spatial import distance
 from sklearn.metrics import confusion_matrix
+from scale_lut import scale_adaptation
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -25,16 +25,16 @@ parser.add_argument("--data_path", type=str, default="propdata/CIFAR10")
 parser.add_argument("--num_steps", type=int, default=50)
 parser.add_argument("--num_epochs", type=int, default=10)
 parser.add_argument("--code_type", type=str, default="mul")
-parser.add_argument("--FS", type=str, default="train")
+parser.add_argument("--FS", type=str, default=None)
 parser.add_argument("--FT", type=str, default="sporadic")
-parser.add_argument("--FG", type=bool, default=True)
-parser.add_argument("--FE", type=int, default=1)
+parser.add_argument("--FG", type=bool, default=False)
+parser.add_argument("--FE", type=int, default=0)
 parser.add_argument("--FL", type=int, default=2)
-parser.add_argument("--FR", type=float, default=0.4)
-parser.add_argument("--stuck", type=float, default=0.3)
+parser.add_argument("--FR", type=float, default=0.1)
+parser.add_argument("--stuck", type=float, default=-0.3)
 parser.add_argument("--mod", type=bool, default=False)
 parser.add_argument("--std", type=float, default=0.1)
-parser.add_argument("--gpu_num", type=int, default=1)
+parser.add_argument("--gpu_num", type=int, default=0)
 parser.add_argument("--plot", type=bool, default=False)
 
 args = parser.parse_args()
@@ -81,122 +81,48 @@ else:
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
 test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=True, drop_last=True)
 
-# Define codes for ECOC
-if FS is None:
+# Scale value setting
+if FS is not None and stuck > 0:
+    scale = scale_adaptation(mod, FE, FR)
+else:
     scale = 1.0
 
-else:
-    if mod:
-        if 0 <= FE <= 1:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.5
-
-        elif 2 <= FE <= 4:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.5
-
-        else:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.5
-
-    else:
-        if 0 <= FE <= 1:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.6
-
-        elif 2 <= FE <= 4:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.6
-
-        else:
-            if 0.1 <= FR <= 0.2:
-                scale = 1.0
-            else:
-                scale = 0.6
-
+# Define code words
 if code_type is None:
     output_num = len(train_set.classes)
 
 elif code_type == "bin":
-    defined_code = torch.tensor([[1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0],
-                                 [1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0],
-                                 [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0],
-                                 [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
-                                 [1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0],
-                                 [0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0],
-                                 [1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-                                 [1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0],
-                                 [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1]], dtype=dtype).to(device)
-
+    defined_code = torch.tensor([[0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0],
+                                 [1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1],
+                                 [0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+                                 [1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1],
+                                 [1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0],
+                                 [1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+                                 [0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0],
+                                 [1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1],
+                                 [1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0],
+                                 [0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1]], dtype=dtype).to(device)
     defined_code *= scale
     num_classes = len(defined_code)
     output_num = len(defined_code[0])
 
 elif code_type == "mul":
-    defined_code = torch.tensor([[1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0],
-                                 [1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0],
-                                 [0, 1, 1, 1, 1, 1, 3, 1, 0, 1, 0, 3, 2, 1, 2],
-                                 [1, 0, 0, 3, 0, 0, 2, 3, 0, 3, 0, 0, 0, 3, 1],
-                                 [1, 1, 3, 0, 1, 1, 0, 2, 0, 1, 1, 1, 0, 0, 0],
-                                 [0, 1, 1, 1, 1, 1, 1, 0, 1, 3, 1, 1, 3, 2, 3],
-                                 [1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0],
-                                 [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0],
-                                 [1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0],
-                                 [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1]], dtype=dtype).to(device)
-
+    defined_code = torch.tensor([[1, 1, 0, 2, 1, 2, 0, 2, 0, 0, 2, 2, 0],
+                                 [1, 1, 0, 2, 1, 2, 1, 0, 1, 1, 1, 0, 2],
+                                 [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 1],
+                                 [1, 1, 1, 0, 0, 1, 2, 0, 2, 2, 0, 2, 2],
+                                 [1, 1, 1, 1, 1, 1, 2, 1, 0, 2, 1, 0, 0],
+                                 [1, 1, 1, 2, 2, 1, 0, 1, 2, 1, 2, 2, 1],
+                                 [1, 1, 1, 2, 2, 0, 2, 1, 1, 0, 0, 0, 2],
+                                 [1, 1, 1, 1, 1, 0, 1, 2, 0, 1, 0, 2, 1],
+                                 [1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0],
+                                 [1, 1, 0, 2, 1, 2, 2, 1, 2, 2, 0, 1, 1]], dtype=dtype).to(device)
     defined_code *= scale
     num_classes = len(defined_code)
     output_num = len(defined_code[0])
 
 else:
     raise ValueError("Invalid code type!")
-
-if 0.0 <= FR <= 0.3 or FS is None:  # 4 bit
-    multi_defined = torch.tensor([[0, 0, 0, 0],
-                                  [0, 0, 1, 1],
-                                  [1, 1, 0, 0],
-                                  [1, 0, 0, 1],
-                                  [1, 1, 1, 1],
-                                  [0, 0, 1, 0],
-                                  [0, 1, 0, 0],
-                                  [1, 0, 0, 0],
-                                  [0, 1, 1, 0],
-                                  [0, 0, 0, 1]], dtype=dtype).to(device)
-
-elif 0.4 <= FR <= 0.7:  # 8 bit
-    multi_defined = torch.tensor([[0, 0, 0, 0, 0, 0, 0, 0],
-                                  [0, 0, 0, 0, 1, 1, 1, 1],
-                                  [1, 1, 1, 1, 1, 1, 1, 1],
-                                  [1, 1, 1, 1, 0, 0, 0, 0],
-                                  [1, 1, 0, 0, 0, 0, 1, 1],
-                                  [0, 0, 0, 0, 1, 1, 0, 0],
-                                  [0, 0, 1, 1, 0, 0, 0, 0],
-                                  [1, 1, 0, 0, 0, 0, 0, 0],
-                                  [0, 0, 1, 1, 1, 1, 0, 0],
-                                  [0, 0, 0, 0, 0, 0, 1, 1]], dtype=dtype).to(device)
-
-else:   # 12 bit
-    multi_defined = torch.tensor([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                                  [0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0],
-                                  [0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1],
-                                  [1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0],
-                                  [1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1],
-                                  [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1],
-                                  [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
-                                  [1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1],
-                                  [1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1],
-                                  [1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0]], dtype=dtype).to(device)
 
 # Fault synapse simulation
 if FL == 1:
@@ -334,62 +260,25 @@ def code_convert(tensor: torch.Tensor):
 
     return torch.tensor(code_converted).to(device)
 
-def multi_convert(multi_code: int):
-    if multi_code == 0:
-        multi_converted = multi_defined[0]
-    elif multi_code == 1 * scale:
-        multi_converted = multi_defined[1]
-    elif multi_code == 2 * scale:
-        multi_converted = multi_defined[2]
-    elif multi_code == 3 * scale:
-        multi_converted = multi_defined[3]
-    elif multi_code == 4 * scale:
-        multi_converted = multi_defined[4]
-    elif multi_code == 5 * scale:
-        multi_converted = multi_defined[5]
-    elif multi_code == 6 * scale:
-        multi_converted = multi_defined[6]
-    elif multi_code == 7 * scale:
-        multi_converted = multi_defined[7]
-    elif multi_code == 8 * scale:
-        multi_converted = multi_defined[8]
-    else:
-        multi_converted = multi_defined[9]
+def distance_hamming(target: np.array, answer: np.array):
+    return np.sum(np.abs(target - answer)).item()
 
-    return multi_converted
-
-def bin_distance_pred(output: torch.Tensor, batch_size: int):
+def hamming_distance_pred(output: torch.Tensor, batch_size: int):
     bin_output = (torch.clip(output, min=0) + 0.005).round(decimals=1)
     if scale.is_integer():
-        bin_output = (torch.clip(output, min=0) + 0.05).round()
+        bin_output = (torch.clip(output, min=0) + 0.05).round().int()
     pred = torch.zeros(batch_size, num_classes).to(device)
     for i in range(batch_size):
         for j in range(num_classes):
-            ham_dist = distance.hamming(bin_output[i].detach().cpu().numpy(), defined_code[j].detach().cpu().numpy())
+            ham_dist = distance_hamming(bin_output[i].detach().cpu().numpy(), defined_code[j].detach().cpu().numpy())
             pred[i, j] = ham_dist
-
-    return pred.argmin(dim=1)
-
-def mul_distance_pred(output: torch.Tensor, batch_size: int):
-    bin_output = (torch.clip(output, min=0, max=num_classes - 1) + 0.005).round(decimals=1)
-    if scale.is_integer():
-        bin_output = (torch.clip(output, min=0, max=num_classes - 1) + 0.05).round()
-    pred = torch.zeros(batch_size, num_classes).to(device)
-    for i in range(batch_size):
-        for j in range(num_classes):
-            for k in range(output_num):
-                ham_dist = distance.hamming(multi_convert(bin_output[i, k]).detach().cpu().numpy(),
-                                            multi_convert(defined_code[j, k]).detach().cpu().numpy())
-                pred[i, j] += ham_dist
 
     return pred.argmin(dim=1)
 
 def print_batch_accuracy(data, targets, train=False):
     output = net(data)
-    if code_type == "bin":
-        train_pred = bin_distance_pred(output, batch_size)
-    elif code_type == "mul":
-        train_pred = mul_distance_pred(output, batch_size)
+    if code_type == "bin" or code_type == "mul":
+        train_pred = hamming_distance_pred(output, batch_size)
     else:
         train_pred = output.argmax(dim=1)
     acc = np.mean((targets == train_pred).detach().cpu().numpy())
@@ -453,6 +342,9 @@ loss_hist = []
 test_loss_hist = []
 counter = 0
 
+total = 0
+correct = 0
+
 # Outer training loop
 for epoch in range(num_epochs):
     iter_counter = 0
@@ -484,6 +376,16 @@ for epoch in range(num_epochs):
     for data, targets in train_batch:
         data = data.to(device)
         targets = targets.to(device)
+
+        # Fault aware LR adjustment
+        if FS == "train":
+            if FG and epoch == num_epochs - 1:
+                if stuck <= 0:
+                    optimizer = torch.optim.Adam(net.parameters(), lr=np.exp(FR) * 5e-4, betas=(0.9, 0.999))
+            else:
+                if epoch > FE and stuck <= 0:
+                    optimizer = torch.optim.Adam(net.parameters(), lr=np.exp(FR) * 1e-4, betas=(0.9, 0.999))
+
         if code_type is None:
             codes = None
         else:
@@ -509,6 +411,7 @@ for epoch in range(num_epochs):
 
         # Test set
         with torch.no_grad():
+            net.eval()
 
             # Fault synapse train
             if epoch > FE and FS == "train":
@@ -516,11 +419,13 @@ for epoch in range(num_epochs):
                                                                          torch.ones_like(
                                                                              fault_mask.transpose(0, 1)))
                 if mod:
-                    fault_mask = fault_mask.bool() * (torch.randn_like(fault_mask) * std + stuck)
+                    if stuck == 0:
+                        fault_mask = torch.randn_like(fault_mask) * std + stuck
+                    else:
+                        fault_mask = fault_mask.bool() * (torch.randn_like(fault_mask) * std + stuck)
 
                 list(net.parameters())[(FL + 1) * 2].data += fault_mask.transpose(0, 1)
 
-            net.eval()
             test_data, test_targets = next(iter(test_loader))
             test_data = test_data.to(device)
             test_targets = test_targets.to(device)
@@ -545,6 +450,44 @@ for epoch in range(num_epochs):
             counter += 1
             iter_counter += 1
 
+            # Fault aware code optimization
+            if FS == "train" and code_type is not None:
+                if (FG and epoch == num_epochs - 2) or (not FG and epoch == FE + 1):
+
+                    # calculate total accuracy
+                    if code_type == "bin" or code_type == "mul":
+                        test_pred = hamming_distance_pred(test_output, batch_size)
+                    else:
+                        test_pred = test_output.argmax(dim=1)
+
+                    total += targets.size(0)
+                    correct += (targets == test_pred).sum().item()
+
+                    w_targets = torch.cat((w_targets, targets), dim=0)
+                    w_predicted = torch.cat((w_predicted, test_pred), dim=0)
+
+                    n_targets = w_targets.detach().cpu().numpy()
+                    n_predicted = w_predicted.detach().cpu().numpy()
+                    cm = confusion_matrix(n_targets, n_predicted)
+                    diag = np.logical_not(np.diag(np.ones(num_classes)))
+                    cm_max = np.argmax(cm * diag)
+                    c1 = int(cm_max / num_classes)
+                    c2 = int(cm_max % num_classes)
+                    pos = random.sample(range(0, output_num - 1), 2)
+
+                elif (FG and epoch == num_epochs - 1) or (not FG and epoch >= FE + 2):
+                    # Modifying code words
+                    if code_type == "bin":
+                        defined_code[c1][pos[0]] = 1
+                        defined_code[c2][pos[0]] = 0
+                        defined_code[c1][pos[1]] = 0
+                        defined_code[c2][pos[1]] = 1
+                    elif code_type == "mul":
+                        defined_code[c1][pos[0]] = 2
+                        defined_code[c2][pos[0]] = 0
+                        defined_code[c1][pos[1]] = 0
+                        defined_code[c2][pos[1]] = 2
+
 second = list(net.parameters())[6].view(512, 1024)
 third = list(net.parameters())[8].view(128, 512)
 
@@ -565,7 +508,10 @@ with torch.no_grad():
         list(net.parameters())[(FL + 1) * 2].data *= torch.where(fault_mask.transpose(0, 1) != 0, 0,
                                                                  torch.ones_like(fault_mask.transpose(0, 1)))
         if mod:
-            fault_mask = fault_mask.bool() * (torch.randn_like(fault_mask) * std + stuck)
+            if stuck == 0:
+                fault_mask = torch.randn_like(fault_mask) * std + stuck
+            else:
+                fault_mask = fault_mask.bool() * (torch.randn_like(fault_mask) * std + stuck)
 
         list(net.parameters())[(FL + 1) * 2].data += fault_mask.transpose(0, 1)
 
@@ -577,10 +523,8 @@ with torch.no_grad():
         test_output = net(data)
 
         # calculate total accuracy
-        if code_type == "bin":
-            test_pred = bin_distance_pred(test_output, batch_size)
-        elif code_type == "mul":
-            test_pred = mul_distance_pred(test_output, batch_size)
+        if code_type == "bin" or code_type == "mul":
+            test_pred = hamming_distance_pred(test_output, batch_size)
         else:
             test_pred = test_output.argmax(dim=1)
         total += targets.size(0)
